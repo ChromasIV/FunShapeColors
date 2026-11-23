@@ -27,11 +27,26 @@
   @keyframes jig { 0%, 100% { rotate: 0deg; scale: 1 } 25% { rotate: -8deg; scale: 1.12 } 75% { rotate: 8deg; scale: 1.12 } }
   .slot.hintslot { animation: glow .8s ease-in-out infinite; }
   @keyframes glow { 50% { transform: scale(1.1); border-color: #ffb703; background: #fff3c4 } }
+  #settings { position: fixed; inset: 0; display: none; place-items: center; background: rgba(59,51,85,.55); z-index: 200; }
+  #settings.show { display: grid; }
+  .panel { background: #fff; border-radius: 28px; padding: 20px 24px; width: min(92vw, 520px); max-height: 92vh; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
+  .panel h2 { margin: 0; text-align: center; font-size: 28px; }
+  .optl { font-weight: bold; margin-bottom: 6px; }
+  .optc { display: flex; gap: 8px; flex-wrap: wrap; }
+  .choice { font: inherit; font-weight: bold; padding: 10px 18px; border-radius: 999px; border: 3px solid var(--ink); background: #fff; color: var(--ink); cursor: pointer; }
+  .choice.on { background: #ffd23f; }
+  #close { font: inherit; font-size: 24px; font-weight: bold; padding: 12px; border-radius: 999px; border: 4px solid var(--ink); background: #5ad66f; color: #fff; cursor: pointer; }
+  .grp { min-width: var(--size); max-width: 34vw; padding: 8px; border-radius: 20px; background: rgba(255,255,255,.75); border: 4px solid #b9b3d0; display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; align-content: center; cursor: pointer; }
+  .grp svg { width: calc(var(--size) * .36); height: calc(var(--size) * .36); }
+  .grp svg.pop { animation: pop .5s; }
+  .op { align-self: center; font-size: calc(var(--size) * .6); font-weight: bold; }
+  .q { font-size: calc(var(--size) * .6); font-weight: bold; color: #b9b3d0; }
+  .numtile { width: 86%; height: 86%; border-radius: 22px; display: grid; place-items: center; color: #fff; font-size: calc(var(--size) * .6); font-weight: bold; text-shadow: 0 3px 0 rgba(0,0,0,.25); border: 3px solid rgba(0,0,0,.2); }
   #prompt { text-align: center; font-size: clamp(22px, 5vw, 40px); font-weight: bold; padding: 6px 12px; min-height: 1.4em; }
   #board { flex: 1; display: flex; flex-direction: column; justify-content: space-around; padding: 0 12px 12px; position: relative; min-height: 0; }
   .row { display: flex; flex-wrap: wrap; justify-content: center; gap: clamp(8px, 3vw, 28px); }
   .slot, .block { width: var(--size); height: var(--size); flex: none; }
-  #board { --size: min(14.5vw, 17vh, 140px); }
+  #board { --size: 110px; }
   .slot { border-radius: 24px; background: rgba(255,255,255,.65); border: 4px dashed #b9b3d0; display: grid; place-items: center; transition: transform .2s; }
   .slot.hover { transform: scale(1.08); border-color: var(--ink); }
   .slot.done { border-style: solid; border-color: transparent; background: rgba(255,255,255,.9); }
@@ -60,6 +75,8 @@
   <button class="mode" data-mode="colors">🎨 Colors</button>
   <button class="mode" data-mode="both">⭐ Both</button>
   <button class="mode" data-mode="find">🎯 Find it</button>
+  <button class="mode" data-mode="add">➕ Adding</button>
+  <button class="tool" id="gear" aria-label="Options">⚙️ Options</button>
 </header>
 <div id="bar">
   <button class="tool" id="say">🔁 Say it again</button>
@@ -71,6 +88,7 @@
   <div class="row" id="slots"></div>
   <div class="row tray" id="tray"></div>
 </div>
+<div id="settings"><div class="panel"><h2>Options</h2><div id="opts"></div><button id="close">Done ✔</button></div></div>
 <div id="win"><div>🎉 Great job! 🎉</div><button id="next">Play again ▶</button></div>
 
 <script>
@@ -85,18 +103,30 @@ const SHAPES = {
   oval:     '<ellipse cx="50" cy="50" rx="46" ry="30"/>',
   hexagon:  '<polygon points="50,5 91,27.5 91,72.5 50,95 9,72.5 9,27.5" stroke-linejoin="round"/>',
   pentagon: '<polygon points="50,5 96,38 78,92 22,92 4,38" stroke-linejoin="round"/>',
+  octagon:  '<polygon points="32,5 68,5 95,32 95,68 68,95 32,95 5,68 5,32" stroke-linejoin="round"/>',
+  cross:    '<polygon points="35,5 65,5 65,35 95,35 95,65 65,65 65,95 35,95 35,65 5,65 5,35 35,35" stroke-linejoin="round"/>',
+  trapezoid:'<polygon points="28,18 72,18 96,82 4,82" stroke-linejoin="round"/>',
+  parallelogram:'<polygon points="28,20 98,20 72,80 2,80" stroke-linejoin="round"/>',
+  kite:     '<polygon points="50,4 82,40 50,96 18,40" stroke-linejoin="round"/>',
+  moon:     '<path d="M70 8 A44 44 0 1 0 92 66 A36 36 0 0 1 70 8Z"/>',
 };
 const COLORS = {
   red: '#ef4444', blue: '#3b82f6', yellow: '#facc15',
   green: '#22c55e', orange: '#fb923c', purple: '#a855f7',
+  pink: '#ec4899', teal: '#14b8a6',
 };
+const BASIC = ['circle', 'square', 'triangle', 'star', 'heart', 'diamond', 'rectangle', 'oval'];
+const DEFAULTS = { pieces: 6, shapes: 'all', addMax: 5, faces: true };
+let settings = { ...DEFAULTS };
+try { Object.assign(settings, JSON.parse(localStorage.getItem('fsc_settings') || '{}')); } catch (e) {}
+const saveSettings = () => { try { localStorage.setItem('fsc_settings', JSON.stringify(settings)); } catch (e) {} };
 const GRAY = '#cfcadf';
 let mode = 'shapes', placedCount = 0, items = [], muted = false, target = null, hintT;
 const kind = () => mode === 'find' ? 'both' : mode;
 
 const $ = s => document.querySelector(s);
 const shuffle = a => a.map(v => [Math.random(), v]).sort((x, y) => x[0] - y[0]).map(x => x[1]);
-const FACE_Y = { triangle: 12, star: 3, heart: -2, oval: 0 };
+const FACE_Y = { triangle: 12, star: 3, heart: -2, trapezoid: 4, kite: 6 };
 const face = (shape, happy) => {
   const y = FACE_Y[shape] || 0;
   return `<g transform="translate(0 ${y})" stroke="none">
@@ -105,7 +135,7 @@ const face = (shape, happy) => {
     <path d="${happy ? 'M36 60 Q50 78 64 60 Z' : 'M41 62 Q50 69 59 62'}" fill="${happy ? '#7a2b3f' : 'none'}" stroke="#2b2540" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></g>`;
 };
 const svg = (shape, fill, opacity = 1, stroke = 'rgba(0,0,0,.25)', mood = null) =>
-  `<svg viewBox="0 0 100 100" fill="${fill}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="3">${SHAPES[shape]}${mood ? face(shape, mood === 'happy') : ''}</svg>`;
+  `<svg viewBox="0 0 100 100" fill="${fill}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="3">${SHAPES[shape]}${mood && settings.faces && shape !== 'moon' ? face(shape, mood === 'happy') : ''}</svg>`;
 
 /* ---------- sound ---------- */
 let ac;
@@ -122,7 +152,7 @@ function armHint() {
   document.querySelectorAll('.hint,.hintslot').forEach(e => e.classList.remove('hint', 'hintslot'));
   hintT = setTimeout(() => {
     const left = items.filter(it => !document.querySelector(`.slot.done[data-key="${it.key}"]`) && document.querySelector(`.block[data-id="${it.id}"]:not(.placed)`));
-    const it = mode === 'find' && target ? target : left[0];
+    const it = (mode === 'find' || mode === 'add') && target ? target : left[0];
     if (!it) return;
     document.querySelector(`.block[data-id="${it.id}"]`)?.classList.add('hint');
     if (mode !== 'find') document.querySelector(`.slot:not(.done)[data-key="${it.key}"]`)?.classList.add('hintslot');
@@ -150,20 +180,23 @@ function say(text) {
     speechSynthesis.speak(u);
   } catch (e) {}
 }
-const nameOf = it => kind() === 'shapes' ? it.shape : kind() === 'colors' ? it.color : `${it.color} ${it.shape}`;
+const nameOf = it => it.num !== undefined ? String(it.num) : kind() === 'shapes' ? it.shape : kind() === 'colors' ? it.color : `${it.color} ${it.shape}`;
 
 /* ---------- round setup ---------- */
 function newRound() {
   $('#win').classList.remove('show');
   placedCount = 0;
-  const allShapes = Object.keys(SHAPES);
-  const colors = shuffle(Object.keys(COLORS));            // 6 different colors
+  if (mode === 'add') { startAdd(); return; }
+  const N = settings.pieces;
+  fitSize(N);
+  const allShapes = settings.shapes === 'basic' ? BASIC : Object.keys(SHAPES);
+  const colors = shuffle(Object.keys(COLORS));            // N different colors
   let shapes;
   if (kind() === 'colors') {
-    shapes = Array.from({length: 6}, () => allShapes[Math.floor(Math.random() * allShapes.length)]);
+    shapes = Array.from({length: N}, () => allShapes[Math.floor(Math.random() * allShapes.length)]);
   } else {
-    const three = shuffle(allShapes).slice(0, 3);          // each shape appears twice, in different colors
-    shapes = shuffle([...three, ...three]);
+    const half = shuffle(allShapes).slice(0, N / 2);       // each shape appears twice, in different colors
+    shapes = shuffle([...half, ...half]);
   }
   items = shapes.map((shape, i) => ({
     id: i, shape, color: colors[i],
@@ -254,6 +287,7 @@ function slotAt(el) {
 
 function place(el, slot, it) {
   el.classList.add('placed');
+  if (mode === 'add') return placeAnswer(el, slot, it);
   slot.classList.add('done', 'pop');
   slot.innerHTML = svg(it.shape, COLORS[it.color], 1, 'rgba(0,0,0,.25)', 'happy');
   el.style.visibility = 'hidden';
@@ -305,6 +339,98 @@ function win() {
   }
 }
 
+/* ---------- sizing ---------- */
+function fitSize(n) {
+  const avail = Math.min(innerWidth, 1100) - 36;
+  let size = Math.min(150, avail / n - 14, innerHeight * .18);
+  if (size < 60) size = Math.min(150, avail / Math.ceil(n / 2) - 14, innerHeight * .11);
+  $('#board').style.setProperty('--size', Math.max(44, Math.floor(size)) + 'px');
+}
+addEventListener('resize', () => fitSize(mode === 'add' ? 4 : settings.pieces));
+
+/* ---------- addition ---------- */
+const NUM_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#fb923c', '#14b8a6'];
+const numTile = (n, c) => `<div class="numtile" style="background:${c}"><span>${n}</span></div>`;
+let qDone = 0, answer = 0;
+const QUESTIONS = 5;
+function startAdd() {
+  qDone = 0; fitSize(4);
+  nextQuestion();
+}
+function groupHTML(n, shape, color) {
+  return `<div class="grp" data-n="${n}">${Array.from({length: n}, () => svg(shape, COLORS[color])).join('')}</div>`;
+}
+function nextQuestion() {
+  const max = settings.addMax;
+  const a = 1 + Math.floor(Math.random() * (max - 1));
+  const b = 1 + Math.floor(Math.random() * (max - a));
+  answer = a + b;
+  const shapes = shuffle(settings.shapes === 'basic' ? BASIC : Object.keys(SHAPES));
+  const colors = shuffle(Object.keys(COLORS));
+  const slots = $('#slots'), tray = $('#tray');
+  slots.innerHTML = tray.innerHTML = '';
+  slots.innerHTML = groupHTML(a, shapes[0], colors[0]) + '<span class="op">+</span>' +
+    groupHTML(b, shapes[1], colors[1]) + '<span class="op">=</span>' +
+    `<div class="slot" data-key="${answer}"><span class="q">?</span></div>`;
+  slots.querySelectorAll('.grp').forEach(g => g.addEventListener('click', () => countAloud(g)));
+  const opts = new Set([answer]);
+  while (opts.size < 3) {
+    const d = answer + (Math.random() < .5 ? -1 : 1) * (1 + Math.floor(Math.random() * 2));
+    if (d >= 1 && d <= Math.max(max, answer + 2)) opts.add(d);
+  }
+  items = shuffle([...opts]).map((n, i) => ({ id: i, num: n, key: String(n), color: NUM_COLORS[(n + i) % NUM_COLORS.length] }));
+  target = items.find(it => it.num === answer);
+  items.forEach(it => {
+    const b = document.createElement('div');
+    b.className = 'block'; b.dataset.id = it.id;
+    b.innerHTML = numTile(it.num, it.color);
+    b.style.setProperty('--d', (Math.random() * -3) + 's');
+    tray.appendChild(b);
+    enableDrag(b, it);
+  });
+  const text = `What is ${a} plus ${b}?`;
+  setPrompt(text, `Question ${qDone + 1} of ${QUESTIONS}: <b>${a} + ${b}</b> = ?`);
+  armHint();
+}
+function countAloud(g) {
+  const kids = [...g.children];
+  kids.forEach((k, i) => setTimeout(() => {
+    k.classList.remove('pop'); void k.getBoundingClientRect(); k.classList.add('pop');
+    tone([440 + i * 60], .1); say(String(i + 1));
+  }, i * 700));
+}
+function placeAnswer(el, slot, it) {
+  slot.classList.add('done', 'pop');
+  slot.innerHTML = numTile(it.num, it.color);
+  el.style.visibility = 'hidden';
+  const r = slot.getBoundingClientRect();
+  sparkle(r.left + r.width / 2, r.top + r.height / 2);
+  tone([523, 659, 784]);
+  const g = $('#slots').querySelectorAll('.grp');
+  say(`${g[0].dataset.n} plus ${g[1].dataset.n} equals ${it.num}!`);
+  clearTimeout(hintT);
+  if (++qDone === QUESTIONS) setTimeout(win, 1600);
+  else setTimeout(nextQuestion, 2200);
+}
+
+/* ---------- settings ---------- */
+const OPTIONS = [
+  { key: 'pieces', label: 'Pieces per game', choices: [[4, '4 (easy)'], [6, '6'], [8, '8 (hard)']] },
+  { key: 'shapes', label: 'Shapes', choices: [['basic', 'Basic'], ['all', 'All 16']] },
+  { key: 'addMax', label: 'Adding up to', choices: [[5, '5'], [10, '10']] },
+  { key: 'faces', label: 'Funny faces', choices: [[true, 'On'], [false, 'Off']] },
+];
+function renderSettings() {
+  $('#opts').innerHTML = OPTIONS.map(o => `<div class="opt"><div class="optl">${o.label}</div><div class="optc">` +
+    o.choices.map(([v, t]) => `<button class="choice${settings[o.key] === v ? ' on' : ''}" data-k="${o.key}" data-v='${JSON.stringify(v)}'>${t}</button>`).join('') +
+    '</div></div>').join('');
+  $('#opts').querySelectorAll('.choice').forEach(b => b.addEventListener('click', () => {
+    settings[b.dataset.k] = JSON.parse(b.dataset.v); saveSettings(); renderSettings();
+  }));
+}
+$('#gear').addEventListener('click', () => { renderSettings(); $('#settings').classList.add('show'); });
+$('#close').addEventListener('click', () => { $('#settings').classList.remove('show'); newRound(); });
+
 /* ---------- wiring ---------- */
 document.querySelectorAll('.mode').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('.mode').forEach(x => x.classList.toggle('on', x === b));
@@ -319,6 +445,7 @@ $('#mute').addEventListener('click', () => {
   try { speechSynthesis.cancel(); } catch (e) {}
 });
 showStars();
+renderSettings();
 newRound();
 </script>
 </body>
