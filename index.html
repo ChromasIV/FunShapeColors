@@ -15,6 +15,18 @@
   header { display: flex; gap: 10px; justify-content: center; align-items: center; padding: 12px 12px 4px; flex-wrap: wrap; }
   .mode { font: inherit; font-size: clamp(16px, 3.2vw, 24px); font-weight: bold; padding: 10px 20px; border-radius: 999px; border: 4px solid var(--ink); background: #fff; color: var(--ink); cursor: pointer; }
   .mode.on { background: #ffd23f; box-shadow: 0 4px 0 var(--ink); transform: translateY(-2px); }
+  #bar { display: flex; gap: 12px; justify-content: center; align-items: center; padding: 4px 12px; }
+  .tool { font: inherit; font-size: clamp(14px, 2.6vw, 20px); font-weight: bold; padding: 8px 16px; border-radius: 999px; border: 3px solid var(--ink); background: #fff; color: var(--ink); cursor: pointer; }
+  #stars { font-size: clamp(20px, 4vw, 30px); font-weight: bold; min-width: 3.2em; text-align: center; }
+  .swatch { display: inline-block; width: .9em; height: .9em; border-radius: 50%; border: 3px solid var(--ink); vertical-align: -.05em; margin-right: .25em; }
+  .eye { transform-box: fill-box; transform-origin: center; animation: blink 4.5s infinite; }
+  @keyframes blink { 0%, 94%, 100% { transform: scaleY(1) } 97% { transform: scaleY(.1) } }
+  .block:not(.drag):not(.placed) { animation: bob 3s ease-in-out infinite; animation-delay: var(--d, 0s); }
+  @keyframes bob { 50% { translate: 0 -6px } }
+  .block.hint { animation: jig .8s ease-in-out infinite !important; }
+  @keyframes jig { 0%, 100% { rotate: 0deg; scale: 1 } 25% { rotate: -8deg; scale: 1.12 } 75% { rotate: 8deg; scale: 1.12 } }
+  .slot.hintslot { animation: glow .8s ease-in-out infinite; }
+  @keyframes glow { 50% { transform: scale(1.1); border-color: #ffb703; background: #fff3c4 } }
   #prompt { text-align: center; font-size: clamp(22px, 5vw, 40px); font-weight: bold; padding: 6px 12px; min-height: 1.4em; }
   #board { flex: 1; display: flex; flex-direction: column; justify-content: space-around; padding: 0 12px 12px; position: relative; min-height: 0; }
   .row { display: flex; flex-wrap: wrap; justify-content: center; gap: clamp(8px, 3vw, 28px); }
@@ -25,7 +37,7 @@
   .slot.done { border-style: solid; border-color: transparent; background: rgba(255,255,255,.9); }
   .slot svg, .block svg { width: 86%; height: 86%; overflow: visible; }
   .block { touch-action: none; cursor: grab; position: relative; filter: drop-shadow(0 6px 0 rgba(0,0,0,.18)); transition: transform .15s; }
-  .block.drag { cursor: grabbing; z-index: 50; transform: scale(1.12) rotate(-4deg); transition: none; filter: drop-shadow(0 14px 8px rgba(0,0,0,.25)); }
+  .block.drag { animation: none; cursor: grabbing; z-index: 50; transform: scale(1.12) rotate(-4deg); transition: none; filter: drop-shadow(0 14px 8px rgba(0,0,0,.25)); }
   .block.back { transition: left .3s, top .3s, transform .3s; }
   .block.wobble { animation: wobble .5s; }
   .block.placed { pointer-events: none; filter: none; }
@@ -47,7 +59,13 @@
   <button class="mode on" data-mode="shapes">🔷 Shapes</button>
   <button class="mode" data-mode="colors">🎨 Colors</button>
   <button class="mode" data-mode="both">⭐ Both</button>
+  <button class="mode" data-mode="find">🎯 Find it</button>
 </header>
+<div id="bar">
+  <button class="tool" id="say">🔁 Say it again</button>
+  <span id="stars" title="Stars earned">⭐ 0</span>
+  <button class="tool" id="mute">🔊 Sound on</button>
+</div>
 <div id="prompt"></div>
 <div id="board">
   <div class="row" id="slots"></div>
@@ -73,16 +91,46 @@ const COLORS = {
   green: '#22c55e', orange: '#fb923c', purple: '#a855f7',
 };
 const GRAY = '#cfcadf';
-let mode = 'shapes', placedCount = 0, items = [];
+let mode = 'shapes', placedCount = 0, items = [], muted = false, target = null, hintT;
+const kind = () => mode === 'find' ? 'both' : mode;
 
 const $ = s => document.querySelector(s);
 const shuffle = a => a.map(v => [Math.random(), v]).sort((x, y) => x[0] - y[0]).map(x => x[1]);
-const svg = (shape, fill, opacity = 1, stroke = 'rgba(0,0,0,.25)') =>
-  `<svg viewBox="0 0 100 100" fill="${fill}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="3">${SHAPES[shape]}</svg>`;
+const FACE_Y = { triangle: 12, star: 3, heart: -2, oval: 0 };
+const face = (shape, happy) => {
+  const y = FACE_Y[shape] || 0;
+  return `<g transform="translate(0 ${y})" stroke="none">
+    <ellipse class="eye" cx="38" cy="45" rx="7" ry="8" fill="#fff"/><ellipse class="eye" cx="62" cy="45" rx="7" ry="8" fill="#fff"/>
+    <circle cx="39" cy="46" r="3.6" fill="#2b2540"/><circle cx="61" cy="46" r="3.6" fill="#2b2540"/>
+    <path d="${happy ? 'M36 60 Q50 78 64 60 Z' : 'M41 62 Q50 69 59 62'}" fill="${happy ? '#7a2b3f' : 'none'}" stroke="#2b2540" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></g>`;
+};
+const svg = (shape, fill, opacity = 1, stroke = 'rgba(0,0,0,.25)', mood = null) =>
+  `<svg viewBox="0 0 100 100" fill="${fill}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="3">${SHAPES[shape]}${mood ? face(shape, mood === 'happy') : ''}</svg>`;
 
 /* ---------- sound ---------- */
 let ac;
+function setPrompt(text, html) { $('#prompt').innerHTML = html || text; window._promptText = text; say(text); }
+function nextTarget() {
+  const left = items.filter(it => !document.querySelector(`.slot.done[data-key="${it.key}"]`));
+  target = left[Math.floor(Math.random() * left.length)];
+  const text = `Find the ${nameOf(target)}!`;
+  setPrompt(text, `Find the <span class="swatch" style="background:${COLORS[target.color]}"></span>${target.color} ${target.shape}!`);
+  armHint();
+}
+function armHint() {
+  clearTimeout(hintT);
+  document.querySelectorAll('.hint,.hintslot').forEach(e => e.classList.remove('hint', 'hintslot'));
+  hintT = setTimeout(() => {
+    const left = items.filter(it => !document.querySelector(`.slot.done[data-key="${it.key}"]`) && document.querySelector(`.block[data-id="${it.id}"]:not(.placed)`));
+    const it = mode === 'find' && target ? target : left[0];
+    if (!it) return;
+    document.querySelector(`.block[data-id="${it.id}"]`)?.classList.add('hint');
+    if (mode !== 'find') document.querySelector(`.slot:not(.done)[data-key="${it.key}"]`)?.classList.add('hintslot');
+    else say('Hmm, ' + nameOf(it) + '. Can you find it?');
+  }, 8000);
+}
 function tone(freqs, dur = .15, type = 'sine') {
+  if (muted) return;
   try {
     ac = ac || new (window.AudioContext || window.webkitAudioContext)();
     freqs.forEach((f, i) => {
@@ -94,6 +142,7 @@ function tone(freqs, dur = .15, type = 'sine') {
   } catch (e) {}
 }
 function say(text) {
+  if (muted) return;
   try {
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
@@ -101,7 +150,7 @@ function say(text) {
     speechSynthesis.speak(u);
   } catch (e) {}
 }
-const nameOf = it => mode === 'shapes' ? it.shape : mode === 'colors' ? it.color : `${it.color} ${it.shape}`;
+const nameOf = it => kind() === 'shapes' ? it.shape : kind() === 'colors' ? it.color : `${it.color} ${it.shape}`;
 
 /* ---------- round setup ---------- */
 function newRound() {
@@ -110,7 +159,7 @@ function newRound() {
   const allShapes = Object.keys(SHAPES);
   const colors = shuffle(Object.keys(COLORS));            // 6 different colors
   let shapes;
-  if (mode === 'colors') {
+  if (kind() === 'colors') {
     shapes = Array.from({length: 6}, () => allShapes[Math.floor(Math.random() * allShapes.length)]);
   } else {
     const three = shuffle(allShapes).slice(0, 3);          // each shape appears twice, in different colors
@@ -118,28 +167,30 @@ function newRound() {
   }
   items = shapes.map((shape, i) => ({
     id: i, shape, color: colors[i],
-    key: mode === 'shapes' ? shape : mode === 'colors' ? colors[i] : shape + '-' + colors[i],
+    key: kind() === 'shapes' ? shape : kind() === 'colors' ? colors[i] : shape + '-' + colors[i],
   }));
   const slots = $('#slots'), tray = $('#tray');
   slots.innerHTML = tray.innerHTML = '';
   shuffle(items).forEach(it => {
     const s = document.createElement('div');
     s.className = 'slot'; s.dataset.key = it.key;
-    s.innerHTML = mode === 'shapes' ? svg(it.shape, GRAY, 1, '#aaa3c4')
-                : mode === 'colors' ? svg('circle', COLORS[it.color], .35, COLORS[it.color])
+    s.innerHTML = kind() === 'shapes' ? svg(it.shape, GRAY, 1, '#aaa3c4')
+                : kind() === 'colors' ? svg('circle', COLORS[it.color], .35, COLORS[it.color])
                 : svg(it.shape, COLORS[it.color], .3, COLORS[it.color]);
     slots.appendChild(s);
   });
   shuffle(items).forEach(it => {
     const b = document.createElement('div');
     b.className = 'block'; b.dataset.id = it.id;
-    b.innerHTML = svg(it.shape, COLORS[it.color]);
+    b.innerHTML = svg(it.shape, COLORS[it.color], 1, 'rgba(0,0,0,.25)', 'calm');
+    b.style.setProperty('--d', (Math.random() * -3) + 's');
     tray.appendChild(b);
     enableDrag(b, it);
   });
-  const hint = mode === 'shapes' ? 'Match the shapes!' : mode === 'colors' ? 'Match the colors!' : 'Match the colors and shapes!';
-  $('#prompt').textContent = hint;
-  say(hint);
+  if (mode === 'find') { nextTarget(); return; }
+  const hint = kind() === 'shapes' ? 'Match the shapes!' : kind() === 'colors' ? 'Match the colors!' : 'Match the colors and shapes!';
+  setPrompt(hint);
+  armHint();
 }
 
 /* ---------- drag & drop ---------- */
@@ -155,6 +206,7 @@ function enableDrag(el, it) {
     el.classList.remove('back', 'wobble');
     el.classList.add('drag');
     ac && ac.state === 'suspended' && ac.resume();
+    armHint();
   });
   el.addEventListener('pointermove', e => {
     if (!dragging) return;
@@ -169,8 +221,15 @@ function enableDrag(el, it) {
     dragging = false;
     el.classList.remove('drag');
     document.querySelectorAll('.slot').forEach(s => s.classList.remove('hover'));
-    if (!moved) { el.style.transform = ''; say(nameOf(it)); return; }  // tap = hear its name
+    if (!moved) { el.style.transform = ''; say(nameOf(it)); el.classList.add('wobble'); setTimeout(() => el.classList.remove('wobble'), 500); return; }  // tap = hear its name
     const hit = slotAt(el);
+    if (mode === 'find' && target && it.id !== target.id && hit) {
+      el.classList.add('back', 'wobble'); el.style.transform = '';
+      setTimeout(() => el.classList.remove('wobble'), 500);
+      tone([300, 240], .18, 'triangle');
+      say(`That is the ${nameOf(it)}. Find the ${nameOf(target)}!`);
+      return;
+    }
     if (hit && hit.dataset.key === it.key) {
       place(el, hit, it);
     } else {
@@ -196,14 +255,16 @@ function slotAt(el) {
 function place(el, slot, it) {
   el.classList.add('placed');
   slot.classList.add('done', 'pop');
-  slot.innerHTML = svg(it.shape, COLORS[it.color]);
+  slot.innerHTML = svg(it.shape, COLORS[it.color], 1, 'rgba(0,0,0,.25)', 'happy');
   el.style.visibility = 'hidden';
   const r = slot.getBoundingClientRect();
   sparkle(r.left + r.width / 2, r.top + r.height / 2);
   tone([523, 659, 784]);
   const label = nameOf(it);
   say(label.charAt(0).toUpperCase() + label.slice(1) + '!');
-  if (++placedCount === items.length) setTimeout(win, 1100);
+  armHint();
+  if (++placedCount === items.length) { clearTimeout(hintT); setTimeout(win, 1100); }
+  else if (mode === 'find') setTimeout(nextTarget, 1400);
 }
 
 /* ---------- celebration ---------- */
@@ -221,7 +282,12 @@ function sparkle(x, y) {
     setTimeout(() => p.remove(), 700);
   }
 }
+let stars = 0;
+try { stars = +localStorage.getItem('fsc_stars') || 0; } catch (e) {}
+const showStars = () => { $('#stars').textContent = '⭐ ' + stars; };
 function win() {
+  stars++; showStars(); $('#stars').classList.add('pop');
+  try { localStorage.setItem('fsc_stars', stars); } catch (e) {}
   $('#win').classList.add('show');
   tone([523, 659, 784, 1047], .18);
   say('Great job!');
@@ -246,6 +312,13 @@ document.querySelectorAll('.mode').forEach(b => b.addEventListener('click', () =
   newRound();
 }));
 $('#next').addEventListener('click', newRound);
+$('#say').addEventListener('click', () => say(window._promptText || ''));
+$('#mute').addEventListener('click', () => {
+  muted = !muted;
+  $('#mute').textContent = muted ? '🔇 Sound off' : '🔊 Sound on';
+  try { speechSynthesis.cancel(); } catch (e) {}
+});
+showStars();
 newRound();
 </script>
 </body>
