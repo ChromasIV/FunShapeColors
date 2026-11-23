@@ -353,8 +353,22 @@ const NUM_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#fb923c', '#14b
 const numTile = (n, c) => `<div class="numtile" style="background:${c}"><span>${n}</span></div>`;
 let qDone = 0, answer = 0;
 const QUESTIONS = 5;
+let qList = [], lastPairs = [];
+function buildQuestions() {
+  const max = settings.addMax, pool = [];
+  for (let a = 1; a < max; a++) for (let b = 1; a + b <= max; b++) pool.push([a, b]);
+  // prefer pairs not used in the previous round, then pick different sums first
+  let fresh = shuffle(pool.filter(p => !lastPairs.includes(p.join('+'))));
+  if (fresh.length < QUESTIONS) fresh = fresh.concat(shuffle(pool.filter(p => !fresh.includes(p))));
+  const picked = [], sums = new Set();
+  for (const p of fresh) { if (picked.length < QUESTIONS && !sums.has(p[0] + p[1])) { picked.push(p); sums.add(p[0] + p[1]); } }
+  for (const p of fresh) { if (picked.length < QUESTIONS && !picked.includes(p)) picked.push(p); }
+  lastPairs = picked.map(p => p.join('+'));
+  return shuffle(picked);
+}
 function startAdd() {
   qDone = 0; fitSize(4);
+  qList = buildQuestions();
   nextQuestion();
 }
 function groupHTML(n, shape, color) {
@@ -362,8 +376,7 @@ function groupHTML(n, shape, color) {
 }
 function nextQuestion() {
   const max = settings.addMax;
-  const a = 1 + Math.floor(Math.random() * (max - 1));
-  const b = 1 + Math.floor(Math.random() * (max - a));
+  const [a, b] = qList[qDone];
   answer = a + b;
   const shapes = shuffle(settings.shapes === 'basic' ? BASIC : Object.keys(SHAPES));
   const colors = shuffle(Object.keys(COLORS));
