@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Fun Shape Colors</title>
+<style>
+  :root {
+    --bg1: #fff7d6; --bg2: #d9f0ff;
+    --ink: #3b3355;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", system-ui, sans-serif; color: var(--ink); }
+  body { background: linear-gradient(160deg, var(--bg1), var(--bg2)); display: flex; flex-direction: column; }
+  header { display: flex; gap: 10px; justify-content: center; align-items: center; padding: 12px 12px 4px; flex-wrap: wrap; }
+  .mode { font: inherit; font-size: clamp(16px, 3.2vw, 24px); font-weight: bold; padding: 10px 20px; border-radius: 999px; border: 4px solid var(--ink); background: #fff; color: var(--ink); cursor: pointer; }
+  .mode.on { background: #ffd23f; box-shadow: 0 4px 0 var(--ink); transform: translateY(-2px); }
+  #prompt { text-align: center; font-size: clamp(22px, 5vw, 40px); font-weight: bold; padding: 6px 12px; min-height: 1.4em; }
+  #board { flex: 1; display: flex; flex-direction: column; justify-content: space-around; padding: 0 12px 12px; position: relative; min-height: 0; }
+  .row { display: flex; justify-content: center; gap: clamp(8px, 3vw, 28px); }
+  .slot, .block { width: var(--size); height: var(--size); flex: none; }
+  #board { --size: min(21vw, 20vh, 160px); }
+  .slot { border-radius: 24px; background: rgba(255,255,255,.65); border: 4px dashed #b9b3d0; display: grid; place-items: center; transition: transform .2s; }
+  .slot.hover { transform: scale(1.08); border-color: var(--ink); }
+  .slot.done { border-style: solid; border-color: transparent; background: rgba(255,255,255,.9); }
+  .slot svg, .block svg { width: 86%; height: 86%; overflow: visible; }
+  .block { touch-action: none; cursor: grab; position: relative; filter: drop-shadow(0 6px 0 rgba(0,0,0,.18)); transition: transform .15s; }
+  .block.drag { cursor: grabbing; z-index: 50; transform: scale(1.12) rotate(-4deg); transition: none; filter: drop-shadow(0 14px 8px rgba(0,0,0,.25)); }
+  .block.back { transition: left .3s, top .3s, transform .3s; }
+  .block.wobble { animation: wobble .5s; }
+  .block.placed { pointer-events: none; filter: none; }
+  .tray { background: rgba(255,255,255,.5); border-radius: 30px; padding: 14px; }
+  @keyframes wobble { 0%,100% { rotate: 0deg } 20% { rotate: -14deg } 40% { rotate: 12deg } 60% { rotate: -8deg } 80% { rotate: 6deg } }
+  @keyframes pop { 0% { transform: scale(1) } 50% { transform: scale(1.3) } 100% { transform: scale(1) } }
+  .pop { animation: pop .4s; }
+  #win { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: rgba(255,255,255,.75); z-index: 100; font-size: clamp(36px, 9vw, 80px); font-weight: bold; text-align: center; }
+  #win.show { display: flex; }
+  #next { font: inherit; font-size: clamp(24px, 6vw, 44px); font-weight: bold; padding: 14px 40px; border-radius: 999px; border: 5px solid var(--ink); background: #5ad66f; color: #fff; text-shadow: 0 2px 0 rgba(0,0,0,.25); cursor: pointer; box-shadow: 0 6px 0 var(--ink); }
+  .confetti { position: fixed; top: -20px; width: 14px; height: 14px; z-index: 120; pointer-events: none; animation: fall linear forwards; }
+  @keyframes fall { to { transform: translateY(110vh) rotate(720deg); } }
+  .spark { position: fixed; width: 12px; height: 12px; border-radius: 50%; z-index: 120; pointer-events: none; animation: burst .6s ease-out forwards; }
+  @keyframes burst { to { transform: translate(var(--dx), var(--dy)) scale(.2); opacity: 0; } }
+</style>
+</head>
+<body>
+<header>
+  <button class="mode on" data-mode="shapes">🔷 Shapes</button>
+  <button class="mode" data-mode="colors">🎨 Colors</button>
+  <button class="mode" data-mode="both">⭐ Both</button>
+</header>
+<div id="prompt"></div>
+<div id="board">
+  <div class="row" id="slots"></div>
+  <div class="row tray" id="tray"></div>
+</div>
+<div id="win"><div>🎉 Great job! 🎉</div><button id="next">Play again ▶</button></div>
+
+<script>
+const SHAPES = {
+  circle:   '<circle cx="50" cy="50" r="44"/>',
+  square:   '<rect x="8" y="8" width="84" height="84" rx="6"/>',
+  triangle: '<polygon points="50,6 96,90 4,90" stroke-linejoin="round"/>',
+  star:     '<polygon points="50,4 62,36 96,38 69,59 79,93 50,73 21,93 31,59 4,38 38,36" stroke-linejoin="round"/>',
+  heart:    '<path d="M50 90 C10 58 4 34 20 18 C34 6 46 14 50 26 C54 14 66 6 80 18 C96 34 90 58 50 90Z"/>',
+};
+const COLORS = {
+  red: '#ef4444', blue: '#3b82f6', yellow: '#facc15',
+  green: '#22c55e', orange: '#fb923c', purple: '#a855f7',
+};
+const GRAY = '#cfcadf';
+let mode = 'shapes', placedCount = 0, items = [];
+
+const $ = s => document.querySelector(s);
+const shuffle = a => a.map(v => [Math.random(), v]).sort((x, y) => x[0] - y[0]).map(x => x[1]);
+const svg = (shape, fill, opacity = 1, stroke = 'rgba(0,0,0,.25)') =>
+  `<svg viewBox="0 0 100 100" fill="${fill}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="3">${SHAPES[shape]}</svg>`;
+
+/* ---------- sound ---------- */
+let ac;
+function tone(freqs, dur = .15, type = 'sine') {
+  try {
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    freqs.forEach((f, i) => {
+      const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime + i * dur;
+      o.type = type; o.frequency.value = f;
+      g.gain.setValueAtTime(.2, t); g.gain.exponentialRampToValueAtTime(.001, t + dur);
+      o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + dur);
+    });
+  } catch (e) {}
+}
+function say(text) {
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = .85; u.pitch = 1.3;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+const nameOf = it => mode === 'shapes' ? it.shape : mode === 'colors' ? it.color : `${it.color} ${it.shape}`;
+
+/* ---------- round setup ---------- */
+function newRound() {
+  $('#win').classList.remove('show');
+  placedCount = 0;
+  const shapes = shuffle(Object.keys(SHAPES)).slice(0, 4);
+  const colors = shuffle(Object.keys(COLORS)).slice(0, 4);
+  items = shapes.map((shape, i) => ({
+    id: i,
+    shape: mode === 'colors' ? 'square' : shape,
+    color: colors[i],
+  }));
+  const slots = $('#slots'), tray = $('#tray');
+  slots.innerHTML = tray.innerHTML = '';
+  shuffle(items).forEach(it => {
+    const s = document.createElement('div');
+    s.className = 'slot'; s.dataset.id = it.id;
+    s.innerHTML = mode === 'shapes' ? svg(it.shape, GRAY, 1, '#aaa3c4')
+                : mode === 'colors' ? svg('circle', COLORS[it.color], .35, COLORS[it.color])
+                : svg(it.shape, COLORS[it.color], .3, COLORS[it.color]);
+    slots.appendChild(s);
+  });
+  shuffle(items).forEach(it => {
+    const b = document.createElement('div');
+    b.className = 'block'; b.dataset.id = it.id;
+    b.innerHTML = svg(it.shape, COLORS[it.color]);
+    tray.appendChild(b);
+    enableDrag(b, it);
+  });
+  const hint = mode === 'shapes' ? 'Match the shapes!' : mode === 'colors' ? 'Match the colors!' : 'Match the colors and shapes!';
+  $('#prompt').textContent = hint;
+  say(hint);
+}
+
+/* ---------- drag & drop ---------- */
+function enableDrag(el, it) {
+  let sx, sy, ox, oy, dragging = false, moved = false;
+  el.addEventListener('pointerdown', e => {
+    if (el.classList.contains('placed')) return;
+    el.setPointerCapture(e.pointerId);
+    const r = el.getBoundingClientRect();
+    sx = e.clientX; sy = e.clientY; moved = false;
+    ox = el.offsetLeft; oy = el.offsetTop; dragging = true;
+    el._home = { w: r.width };
+    el.classList.remove('back', 'wobble');
+    el.classList.add('drag');
+    ac && ac.state === 'suspended' && ac.resume();
+  });
+  el.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    if (Math.abs(dx) + Math.abs(dy) > 6) moved = true;
+    el.style.transform = `translate(${dx}px, ${dy}px) scale(1.12) rotate(-4deg)`;
+    const hit = slotAt(el);
+    document.querySelectorAll('.slot').forEach(s => s.classList.toggle('hover', s === hit));
+  });
+  const end = e => {
+    if (!dragging) return;
+    dragging = false;
+    el.classList.remove('drag');
+    document.querySelectorAll('.slot').forEach(s => s.classList.remove('hover'));
+    if (!moved) { el.style.transform = ''; say(nameOf(it)); return; }  // tap = hear its name
+    const hit = slotAt(el);
+    if (hit && +hit.dataset.id === it.id) {
+      place(el, hit, it);
+    } else {
+      el.classList.add('back');
+      el.style.transform = '';
+      if (hit) { tone([300, 240], .18, 'triangle'); say('Try again!'); el.classList.add('wobble'); setTimeout(() => el.classList.remove('wobble'), 500); }
+    }
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+}
+
+function slotAt(el) {
+  const r = el.getBoundingClientRect();
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  for (const s of document.querySelectorAll('.slot:not(.done)')) {
+    const b = s.getBoundingClientRect();
+    if (cx > b.left && cx < b.right && cy > b.top && cy < b.bottom) return s;
+  }
+  return null;
+}
+
+function place(el, slot, it) {
+  el.classList.add('placed');
+  slot.classList.add('done', 'pop');
+  slot.innerHTML = svg(it.shape, COLORS[it.color]);
+  el.style.visibility = 'hidden';
+  const r = slot.getBoundingClientRect();
+  sparkle(r.left + r.width / 2, r.top + r.height / 2);
+  tone([523, 659, 784]);
+  const label = nameOf(it);
+  say(label.charAt(0).toUpperCase() + label.slice(1) + '!');
+  if (++placedCount === items.length) setTimeout(win, 1100);
+}
+
+/* ---------- celebration ---------- */
+function sparkle(x, y) {
+  const cols = Object.values(COLORS);
+  for (let i = 0; i < 14; i++) {
+    const p = document.createElement('div');
+    p.className = 'spark';
+    p.style.left = x + 'px'; p.style.top = y + 'px';
+    p.style.background = cols[i % cols.length];
+    const a = Math.random() * 6.28, d = 50 + Math.random() * 60;
+    p.style.setProperty('--dx', Math.cos(a) * d + 'px');
+    p.style.setProperty('--dy', Math.sin(a) * d + 'px');
+    document.body.appendChild(p);
+    setTimeout(() => p.remove(), 700);
+  }
+}
+function win() {
+  $('#win').classList.add('show');
+  tone([523, 659, 784, 1047], .18);
+  say('Great job!');
+  const cols = Object.values(COLORS);
+  for (let i = 0; i < 50; i++) {
+    const c = document.createElement('div');
+    c.className = 'confetti';
+    c.style.left = Math.random() * 100 + 'vw';
+    c.style.background = cols[i % cols.length];
+    c.style.animationDuration = 2 + Math.random() * 2 + 's';
+    c.style.animationDelay = Math.random() * .8 + 's';
+    c.style.borderRadius = i % 2 ? '50%' : '2px';
+    document.body.appendChild(c);
+    setTimeout(() => c.remove(), 5000);
+  }
+}
+
+/* ---------- wiring ---------- */
+document.querySelectorAll('.mode').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.mode').forEach(x => x.classList.toggle('on', x === b));
+  mode = b.dataset.mode;
+  newRound();
+}));
+$('#next').addEventListener('click', newRound);
+newRound();
+</script>
+</body>
+</html>
